@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Used Access Cards</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #6366f1;
+    --success: #16a34a;
+    --error: #dc2626;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px 60px;
+  }
+  .wrap { width: 100%; max-width: 640px; }
+  h1 {
+    font-size: 22px;
+    text-align: center;
+    margin: 0 0 4px;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 20px;
+  }
+  .nav-row {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+  .secondary-btn {
+    display: inline-block;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+  }
+  .secondary-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  input[type="text"] {
+    flex: 1;
+    background: #0b1220;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  input[type="text"]:focus { outline: 2px solid var(--accent); }
+  .count-badge {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  td.code-cell { font-family: ui-monospace, monospace; }
+  .status-pill {
+    display: inline-block;
+    background: rgba(22,163,74,0.15);
+    color: var(--success);
+    border: 1px solid var(--success);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .empty, .loading, .error-msg {
+    text-align: center;
+    color: var(--muted);
+    padding: 24px 0;
+    font-size: 14px;
+  }
+  .error-msg { color: var(--error); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Used Access Cards</h1>
+  <p class="subtitle">Every code that has already been checked in</p>
+
+  <div class="nav-row">
+    <a href="/index.html" class="secondary-btn">← Back to Scanner</a>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <input type="text" id="searchInput" placeholder="Filter by code..." autocomplete="off" />
+      <span class="count-badge" id="countBadge"></span>
+    </div>
+
+    <div id="tableWrap">
+      <p class="loading">Loading used cards...</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const tableWrap = document.getElementById('tableWrap');
+  const countBadge = document.getElementById('countBadge');
+  const searchInput = document.getElementById('searchInput');
+
+  let allCards = [];
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  }
+
+  function renderTable(cards) {
+    if (cards.length === 0) {
+      tableWrap.innerHTML = '<p class="empty">No used cards match.</p>';
+      return;
+    }
+
+    const rows = cards.map(c => `
+      <tr>
+        <td class="code-cell">${escapeHtml(c.code)}</td>
+        <td><span class="status-pill">Used</span></td>
+        <td>${escapeHtml(formatDate(c.used_at))}</td>
+      </tr>
+    `).join('');
+
+    tableWrap.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Status</th>
+            <th>Used At</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  function applyFilter() {
+    const q = searchInput.value.trim().toLowerCase();
+    const filtered = q
+      ? allCards.filter(c => c.code.toLowerCase().includes(q))
+      : allCards;
+    renderTable(filtered);
+    countBadge.textContent = `${filtered.length} of ${allCards.length} shown`;
+  }
+
+  searchInput.addEventListener('input', applyFilter);
+
+  async function loadUsedCards() {
+    try {
+      const res = await fetch('/api/used-codes.php');
+      const data = await res.json();
+
+      if (data.status !== 'success') {
+        tableWrap.innerHTML = '<p class="error-msg">' + escapeHtml(data.message || 'Failed to load used cards.') + '</p>';
+        return;
+      }
+
+      allCards = data.cards || [];
+      applyFilter();
+    } catch (err) {
+      tableWrap.innerHTML = '<p class="error-msg">Could not reach the server. Check your connection.</p>';
+    }
+  }
+
+  loadUsedCards();
+</script>
+</body>
+</html>

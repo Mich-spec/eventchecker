@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Event Check-In Scanner</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #6366f1;
+    --success: #16a34a;
+    --error: #dc2626;
+    --warn: #d97706;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px 60px;
+  }
+  .wrap { width: 100%; max-width: 480px; }
+  h1 {
+    font-size: 22px;
+    text-align: center;
+    margin: 0 0 4px;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 20px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  #reader {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .result {
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 16px;
+    font-size: 15px;
+    line-height: 1.4;
+    display: none;
+  }
+  .result.visible { display: block; }
+  .result.success { background: rgba(22,163,74,0.15); border: 1px solid var(--success); }
+  .result.already_used { background: rgba(217,119,6,0.15); border: 1px solid var(--warn); }
+  .result.invalid, .result.error { background: rgba(220,38,38,0.15); border: 1px solid var(--error); }
+  .result .status-line { font-weight: 700; margin-bottom: 4px; }
+  .result.success .status-line { color: var(--success); }
+  .result.already_used .status-line { color: var(--warn); }
+  .result.invalid .status-line, .result.error .status-line { color: var(--error); }
+  .result .code-line { color: var(--muted); font-size: 13px; }
+
+  form {
+    display: flex;
+    gap: 8px;
+  }
+  input[type="text"] {
+    flex: 1;
+    background: #0b1220;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 15px;
+  }
+  input[type="text"]:focus { outline: 2px solid var(--accent); }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .hint {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 10px;
+  }
+  .nav-row {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+  .secondary-btn {
+    display: inline-block;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+  }
+  .secondary-btn:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Event Check-In</h1>
+  <p class="subtitle">Scan a QR code or enter it manually</p>
+
+  <div class="nav-row">
+    <a href="/used-cards.html" class="secondary-btn">📋 View Used Access Cards</a>
+  </div>
+
+  <div id="result" class="result"></div>
+
+  <div class="card">
+    <div id="reader"></div>
+  </div>
+
+  <div class="card">
+    <form id="manualForm">
+      <input type="text" id="manualCode" placeholder="e.g. EVENT-2026-0003" autocomplete="off" />
+      <button type="submit">Check In</button>
+    </form>
+    <p class="hint">Camera not working? Type the code above instead.</p>
+  </div>
+</div>
+
+<script>
+  const resultEl = document.getElementById('result');
+  const manualForm = document.getElementById('manualForm');
+  const manualInput = document.getElementById('manualCode');
+
+  let isProcessing = false;
+  let resumeTimer = null;
+
+  function showResult(data) {
+    clearTimeout(resumeTimer);
+    resultEl.className = 'result visible ' + data.status;
+    resultEl.innerHTML =
+      '<div class="status-line">' + escapeHtml(data.message || 'Unknown response') + '</div>' +
+      (data.code ? '<div class="code-line">Code: ' + escapeHtml(data.code) + '</div>' : '');
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  async function submitCode(code) {
+    if (isProcessing) return;
+    isProcessing = true;
+    try {
+      const res = await fetch('/api/scan.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      showResult(data);
+    } catch (err) {
+      showResult({ status: 'error', message: 'Could not reach the server. Check your connection.' });
+    } finally {
+      // Small cooldown before the next scan/submit is accepted, so the
+      // same QR code isn't fired at the server multiple times while the
+      // camera keeps reading the same frame.
+      resumeTimer = setTimeout(() => { isProcessing = false; }, 1800);
+    }
+  }
+
+  // --- Manual entry ---
+  manualForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const code = manualInput.value.trim();
+    if (!code) return;
+    submitCode(code);
+    manualInput.value = '';
+  });
+
+  // --- Camera scanning ---
+  const qrRegionId = 'reader';
+  const html5QrCode = new Html5Qrcode(qrRegionId);
+
+  function onScanSuccess(decodedText) {
+    submitCode(decodedText);
+  }
+
+  Html5Qrcode.getCameras()
+    .then((cameras) => {
+      if (!cameras || cameras.length === 0) {
+        document.getElementById(qrRegionId).innerHTML =
+          '<p style="color:#94a3b8;text-align:center;padding:20px 0;">No camera found. Use manual entry below.</p>';
+        return;
+      }
+      // Prefer the back/environment camera on phones.
+      const backCamera = cameras.find((c) => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+      html5QrCode.start(
+        backCamera.id,
+        { fps: 10, qrbox: { width: 240, height: 240 } },
+        onScanSuccess,
+        () => { /* ignore per-frame decode errors */ }
+      );
+    })
+    .catch(() => {
+      document.getElementById(qrRegionId).innerHTML =
+        '<p style="color:#94a3b8;text-align:center;padding:20px 0;">Camera permission denied. Use manual entry below.</p>';
+    });
+</script>
+</body>
+</html>
